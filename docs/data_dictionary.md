@@ -52,6 +52,6 @@ Cleaned Parquet files in `data/interim/` use the English names below.
 
 ## Dataset built (1 Oct 2026)
 
-14 months (Aug 2025 – Sep 2026), 425 days, all present. 76.0 M train rows
+14 months (Aug 2025 – Sep 2026), 426 days, all present. 76.0 M train rows
 (158 k – 188 k per day), 840 MB of Parquet in `data/interim/`. Details per month in
 `data/dataset_manifest.json`.

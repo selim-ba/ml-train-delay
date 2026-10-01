@@ -27,3 +27,6 @@ models/*.pt
 .vscode/
 .idea/
 .env
+
+# Private working notes (not pushed)
+ROADMAP.md

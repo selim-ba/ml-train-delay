@@ -22,3 +22,6 @@ reproduce:      ## rebuild baselines and report (filled in as the pipeline grows
 
 clean:
 	rm -rf .pytest_cache .ruff_cache **/__pycache__
+
+journeys:       ## rebuild journeys from data/interim
+	uv run python -m swissdelay.data.journeys

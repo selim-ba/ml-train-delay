@@ -9,6 +9,7 @@ Predict how a running train's delay will change over the next 15, 30 and 60 minu
 ## Scope and data
 
 - **Trains:** IC, IR, RE and EC, nationwide, keeping whole trips and the full graph.
+  International long-distance trains (ICE, TGV, RJX, RJ, NJ, EN) are **not** prediction targets in v1; they are used as network context only (decided 1 Oct 2026). Adding them on their Swiss sections is a v2 candidate.
 - **Period:** Aug 2025 – Sep 2026 (v2 format only). Updated 1 Oct 2026, was Nov 2025 – Jun 2026.
 - **Source:** Ist-Daten (actual data). GTFS `stops.txt` for coordinates only.
 - **Ground truth:** only `REAL` measured times count.

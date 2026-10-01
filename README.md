@@ -4,7 +4,7 @@
 
 SwissDelay is a leakage-safe benchmark of train-delay propagation on Swiss operating data. At every measured departure of an IC, IR, RE or EC train, it predicts how the delay will change **15, 30 and 60 minutes ahead**, and compares persistence, historical means, Ridge, XGBoost, a sequence model and a GNN.
 
-> **Status:** 🚧 project setup. Results, figures and the project website will be linked here as they land.
+> **Status:** 🚧 Day 1 done: data ingested, quality audited, journeys rebuilt. Next: prediction points, labels and baselines. Results, figures and the project website will be linked here as they land.
 
 ## Results
 
@@ -41,6 +41,31 @@ uv run python -m swissdelay.data.ingest 2025-08 2026-09
 
 Each month's source URL, checksums and row counts are recorded in [`data/dataset_manifest.json`](data/dataset_manifest.json). A month of raw CSVs (~16 GB) becomes a ~60 MB Parquet file.
 
+A second command rebuilds the journeys of in-scope trains, applying the data-quality decisions below, and writes `data/processed/journeys_YYYY-MM.parquet`:
+
+```bash
+uv run python -m swissdelay.data.journeys
+```
+
+### Data quality
+
+The audit is in [`notebooks/01-data-quality.ipynb`](notebooks/01-data-quality.ipynb) (section 9 summarises it).
+
+| | |
+|---|---|
+| Dataset | 426 days (1 Aug 2025 – 30 Sep 2026), 76.0 M train rows, no missing day |
+| Scope | 1.16 M IC / IR / RE / EC train runs (≈ 2,700 per day) |
+| Measured (`REAL`) times | 95.7 % at Swiss stops, 0.7 % abroad; no feed outage |
+| Delays | median < 1 min (IC / IR / RE), 1.5 min (EC); > 3 min late: 8–10 % (IC / IR / RE), 29 % (EC) |
+| Cancellations | 1.0 % of runs fully, 6.1 % partially; twice as many at weekends (engineering works) |
+| Prediction points | 7.38 M eligible measured departures in 1.11 M journeys (before horizon labels) |
+
+Main cleaning rules, all implemented in `swissdelay.data.journeys`:
+
+- **Swiss stops only**: foreign stops have almost no measured times. Cross-border runs keep their Swiss section, flagged `enters_from_abroad`.
+- **Keep every row, but only `REAL` times count**; a `REAL` time giving a delay outside [−5 min, +6 h] is a data error and is treated as missing.
+- **Eligible prediction points and targets** exclude three poorly measured operators (FART, DB, DB Regio), stations with < 80 % measured departures over the training months, pass-through and cancelled stops, and anomalous journeys (0.06 %).
+
 ## Method
 
 - **Target:** the change in delay `Δd = d(t+h) − d(t)`, so persistence is `Δd = 0`.
@@ -56,12 +81,12 @@ The full plan is in [`docs/roadmap.md`](docs/roadmap.md).
 train-delay/
 ├── data/               # raw / interim / processed / external (git-ignored)
 ├── docs/               # roadmap and design notes
-├── notebooks/          # exploration (numbered, e.g. 01-pilot-eda.ipynb)
+├── notebooks/          # 01-data-quality.ipynb: data audit and decisions
 ├── reports/figures/    # generated figures
 ├── site/               # minimal results website
 ├── src/swissdelay/
 │   ├── config.py       # paths, scope, horizons, splits
-│   ├── data/           # ingest.py (download → Parquet), journey reconstruction
+│   ├── data/           # ingest.py (download → Parquet), journeys.py (journey reconstruction)
 │   ├── features/       # prediction points, labels, features
 │   ├── models/         # baselines, XGBoost, sequence, GNN
 │   └── evaluation/     # metrics, common subset, bootstrap CIs
@@ -93,7 +118,7 @@ On macOS, XGBoost needs OpenMP: `brew install libomp`.
 
 - [x] Project setup
 - [x] Monthly ingestion to Parquet (`swissdelay.data.ingest`)
-- [ ] Day 1: 7-day pilot, train filtering, journey reconstruction, data quality report
+- [x] Day 1: train filtering, data quality report, journey reconstruction (`swissdelay.data.journeys`)
 - [ ] Day 2: prediction points, labels, persistence and historical-mean baselines
 - [ ] Day 3: Ridge and train-only XGBoost
 - [ ] Day 4: network features, leakage tests, **gate** for the GNN
