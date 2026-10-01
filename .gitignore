@@ -1,0 +1,29 @@
+# Data (never committed — rebuild with the download scripts)
+data/raw/*
+data/interim/*
+data/processed/*
+data/external/*
+!data/**/.gitkeep
+!data/dataset_manifest.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Experiment tracking / models
+mlruns/
+wandb/
+models/*.json
+models/*.pt
+*.ckpt
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/
+.env
