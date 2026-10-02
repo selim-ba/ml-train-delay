@@ -46,13 +46,30 @@ def test_evaluate_shape_and_reference():
     assert (res["days"] == 10).all() and (res["n"] == 200).all()
 
 
-def test_disruption_days_are_top_share():
-    stats = pd.DataFrame(
+def _daily(n_train=100, n_future=10, future_level=200.0):
+    """Training days with increasing delay / cancellations, then much worse future days."""
+    delay = np.r_[np.arange(n_train, dtype=float), np.full(n_future, future_level)]
+    return pd.DataFrame(
         {
-            "mean_delay_min": np.r_[np.ones(38), 5.0, 6.0],
-            "cancelled_runs_share": np.r_[np.full(38, 0.01), 0.10, 0.20],
+            "mean_delay_min": delay,
+            "cancelled_runs_share": delay / 1000,
+            "split": ["train"] * n_train + ["test"] * n_future,
         }
     )
-    out = flag_disruption_days(stats, share=0.05)  # ceil(0.05 * 40) = 2 days
-    assert out["is_disruption_day"].sum() == 2
-    assert out["is_disruption_day"].iloc[-2:].all()
+
+
+def test_disruption_threshold_is_fitted_on_training_days():
+    stats = _daily()
+    out = flag_disruption_days(stats, reference=stats["split"] == "train")
+    train = out[out["split"] == "train"]
+    assert train["is_disruption_day"].sum() == 5  # above the 95th percentile of 100 days
+    assert out.loc[out["split"] == "test", "is_disruption_day"].all()  # all worse than train
+
+
+def test_future_days_do_not_change_training_flags():
+    few = flag_disruption_days(s := _daily(n_future=1), reference=s["split"] == "train")
+    many = flag_disruption_days(m := _daily(n_future=50), reference=m["split"] == "train")
+    a = few.loc[few["split"] == "train", "is_disruption_day"].to_numpy()
+    b = many.loc[many["split"] == "train", "is_disruption_day"].to_numpy()
+    assert (a == b).all()
+    assert few["disruption_threshold"].iloc[0] == many["disruption_threshold"].iloc[0]

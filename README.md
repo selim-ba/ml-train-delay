@@ -4,7 +4,7 @@
 
 SwissDelay is a leakage-safe benchmark of train-delay propagation on Swiss operating data. At every measured departure of an IC, IR, RE or EC train, it predicts how the delay will change **15, 30 and 60 minutes ahead**, and compares persistence, historical means, Ridge, XGBoost, a sequence model and a GNN.
 
-> **Status:** 🚧 Day 2 done: labels and baselines. Next: Ridge and XGBoost (Day 3). Results, figures and the project website will be linked here as they land.
+> **Status:** 🚧 labels and baselines done. Next: Ridge and XGBoost models. Results, figures and the project website will be linked here as they land.
 
 ## Results
 
@@ -130,15 +130,15 @@ On macOS, XGBoost needs OpenMP: `brew install libomp`.
 
 - [x] Project setup
 - [x] Monthly ingestion to Parquet (`swissdelay.data.ingest`)
-- [x] Day 1: train filtering, data quality report, journey reconstruction (`swissdelay.data.journeys`)
-- [x] Day 2: labels, coverage, persistence / offset / historical baselines (`swissdelay.features.labels`, `swissdelay.models.baselines`)
-- [ ] Day 3: Ridge and train-only XGBoost
-- [ ] Day 4: network features, leakage tests, **gate** for the GNN
-- [ ] Day 5: sequence model
-- [ ] Day 6–7: GNN (if the gate passes)
-- [ ] Day 8: final evaluation
-- [ ] Day 9: nightly replay pipeline, API, dashboard
-- [ ] Day 10: write-up and website
+- [x] Data quality report and journey reconstruction (`swissdelay.data.journeys`)
+- [x] Horizon labels, coverage and baselines: persistence, constant offset, historical median (`swissdelay.features.labels`, `swissdelay.models.baselines`)
+- [ ] Ridge and train-only XGBoost
+- [ ] Network features, leakage tests, **gate** for the GNN
+- [ ] Sequence model
+- [ ] GNN (if the gate passes)
+- [ ] Final evaluation: severity and disruption breakdowns, confidence intervals
+- [ ] Nightly replay pipeline, API, dashboard
+- [ ] Write-up and results website
 
 ## License
 

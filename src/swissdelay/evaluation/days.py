@@ -1,15 +1,17 @@
 """Daily statistics and the definition of disruption days.
 
-A disruption day is one of the worst 5 % of days of the study period by a combination of
-mean delay and cancellations (equal weight, z-scores). It is a reporting stratum, not a
-model feature, so it is computed on all days at once.
+Each day gets a disruption score: the average of the z-scores of its mean departure
+delay and of its share of runs with a cancelled stop. The z-scores and the threshold are
+fitted on the **training days only**: a disruption day is a day whose score is above the
+95th percentile of training days, i.e. "worse than 95 % of training days". Nothing is
+learned from validation, test or production days, and each split gets as many disruption
+days as it really has. It is a reporting stratum, not a model feature.
 
 Output: ``data/processed/daily_stats.parquet``, one row per operating day.
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import duckdb
@@ -18,7 +20,7 @@ import pandas as pd
 from swissdelay import config
 from swissdelay.evaluation.splits import split_of
 
-DISRUPTION_SHARE = 0.05
+DISRUPTION_QUANTILE = 0.95
 DAILY_STATS_PATH = config.PROCESSED / "daily_stats.parquet"
 
 
@@ -40,17 +42,24 @@ def daily_stats_sql(source: str) -> str:
     """
 
 
-def flag_disruption_days(stats: pd.DataFrame, share: float = DISRUPTION_SHARE) -> pd.DataFrame:
-    """Add ``disruption_score`` and ``is_disruption_day`` (top ``share`` of days)."""
+def flag_disruption_days(
+    stats: pd.DataFrame, reference: pd.Series, quantile: float = DISRUPTION_QUANTILE
+) -> pd.DataFrame:
+    """Add ``disruption_score``, ``disruption_threshold`` and ``is_disruption_day``.
+
+    ``reference`` is a boolean mask of the days used to fit the z-scores and the
+    threshold (the training days).
+    """
     out = stats.copy()
+    ref = out[reference]
 
-    def z(s: pd.Series) -> pd.Series:
-        return (s - s.mean()) / s.std(ddof=0)
+    def z(col: str) -> pd.Series:
+        return (out[col] - ref[col].mean()) / ref[col].std(ddof=0)
 
-    out["disruption_score"] = (z(out["mean_delay_min"]) + z(out["cancelled_runs_share"])) / 2
-    n_flag = math.ceil(share * len(out))
-    top = out["disruption_score"].rank(ascending=False, method="first") <= n_flag
-    out["is_disruption_day"] = top
+    out["disruption_score"] = (z("mean_delay_min") + z("cancelled_runs_share")) / 2
+    threshold = float(out.loc[reference, "disruption_score"].quantile(quantile))
+    out["disruption_threshold"] = threshold
+    out["is_disruption_day"] = out["disruption_score"] > threshold
     return out
 
 
@@ -60,8 +69,8 @@ def build_daily_stats(
     source = "[" + ", ".join("'" + str(p).replace("'", "''") + "'" for p in sources) + "]"
     stats = con.sql(daily_stats_sql(source)).df()
     stats["operating_day"] = pd.to_datetime(stats["operating_day"]).dt.date  # DATE in Parquet
-    stats = flag_disruption_days(stats)
     stats["split"] = stats["operating_day"].map(split_of)
+    stats = flag_disruption_days(stats, reference=stats["split"] == "train")
     stats["weekday"] = pd.to_datetime(stats["operating_day"]).dt.day_name()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     stats.to_parquet(out_path, index=False)
@@ -74,7 +83,8 @@ def main() -> None:
         raise SystemExit("No journeys: run swissdelay.data.journeys first")
     stats = build_daily_stats(duckdb.connect(), sources)
     flagged = stats[stats["is_disruption_day"]].sort_values("disruption_score", ascending=False)
-    print(f"{len(flagged)} disruption days out of {len(stats)}:")
+    print(f"{len(flagged)} disruption days of {len(stats)} (threshold fitted on training days):")
+    print(stats.groupby("split")["is_disruption_day"].agg(["sum", "count"]).to_string())
     cols = ["operating_day", "weekday", "split", "mean_delay_min", "cancelled_runs_share"]
     print(flagged[cols].to_string(index=False))
 

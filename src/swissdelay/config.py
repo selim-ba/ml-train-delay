@@ -20,7 +20,7 @@ REPORTING_LAG_MIN = 2
 
 # Time-based splits (inclusive end dates)
 TRAIN_END = "2026-04-30"  # train:      Aug 2025 - Apr 2026
-VALID_END = "2026-05-31"  # validation: May 2026 (model selection, Day-4 gate)
+VALID_END = "2026-05-31"  # validation: May 2026 (model selection, network-feature gate)
 TEST_END = "2026-06-30"  # test:       Jun 2026 (headline benchmark)
 # Jul - Sep 2026: simulated production, replayed day by day, never used for development
 

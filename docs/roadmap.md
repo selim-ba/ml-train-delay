@@ -51,7 +51,7 @@ Predict how a running train's delay will change over the next 15, 30 and 60 minu
 | Sequence (GRU/transformer, d=128) | full trajectory | ✓ | – |
 | GNN (GraphSAGE, 2 layers) | ✓ | ✓ | learned |
 
-**Gate (Day 4):** if XGBoost + network does not beat train-only XGBoost on validation (day-clustered CI excludes 0), the GNN becomes a short negative-result section.
+**Gate:** if XGBoost + network does not beat train-only XGBoost on validation (day-clustered CI excludes 0), the GNN becomes a short negative-result section.
 
 ## Production
 
