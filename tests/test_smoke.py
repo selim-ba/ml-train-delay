@@ -6,7 +6,13 @@ def test_version():
 
 
 def test_splits_are_ordered():
-    assert config.PERIOD_START < config.TRAIN_END < config.VALID_END < config.TEST_END < config.PERIOD_END
+    assert (
+        config.PERIOD_START
+        < config.TRAIN_END
+        < config.VALID_END
+        < config.TEST_END
+        < config.PERIOD_END
+    )
 
 
 def test_horizons_sorted():

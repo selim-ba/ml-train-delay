@@ -20,6 +20,7 @@ mlruns/
 wandb/
 models/*.json
 models/*.pt
+models/*.joblib
 *.ckpt
 
 # OS / editors

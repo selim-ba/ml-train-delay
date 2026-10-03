@@ -4,7 +4,7 @@
 
 SwissDelay is a leakage-safe benchmark of train-delay propagation on Swiss operating data. At every measured departure of an IC, IR, RE or EC train, it predicts how the delay will change **15, 30 and 60 minutes ahead**, and compares persistence, historical means, Ridge, XGBoost, a sequence model and a GNN.
 
-> **Status:** 🚧 labels and baselines done. Next: Ridge and XGBoost models. Results, figures and the project website will be linked here as they land.
+> **Status:** 🚧 baselines and tabular models (Ridge, XGBoost) done. Next: network features and the GNN gate. Results, figures and the project website will be linked here as they land.
 
 ## Results
 
@@ -14,11 +14,15 @@ Validation month (May 2026), common subset of 183 k prediction points labelled a
 |---|---|---|---|
 | Persistence (delay stays the same) | 1.33 | 1.47 | 1.64 |
 | Constant offset (training median Δd) | 1.06 | 1.25 | 1.44 |
-| **Historical median** (line × station × hour × day type) | **0.88** [0.86, 0.91] | **1.07** [1.04, 1.11] | **1.28** [1.22, 1.33] |
+| Historical median (line × station × hour × day type) | 0.88 | 1.07 | 1.28 |
+| Ridge (same features as XGBoost) | 0.87 | 1.03 | 1.20 |
+| **XGBoost** | **0.72** [0.70, 0.74] | **0.86** [0.83, 0.89] | **1.02** [0.97, 1.07] |
 
-- Δd has a structural offset of ≈ −0.8 min (trains tend to arrive slightly early), so the **constant offset** is the reference a model must beat to show real skill.
-- The historical median beats it significantly at every horizon (−0.16 to −0.18 min). It ignores the current delay, where most of the remaining error lies (trains already > 10 min late: 2.9 / 4.5 / 6.3 min).
-- Details: [`notebooks/02-labels-baselines.ipynb`](notebooks/02-labels-baselines.ipynb).
+- **XGBoost cuts the error by 18–20 % vs the historical median** and by 38–46 % vs persistence, at every horizon (intervals of the difference exclude 0). The gain is largest for late trains: −35 to −48 % for trains 3–10 min late.
+- **The train's trajectory before its current stop adds nothing** once its current delay, arrival delay and dwell are known; **timetable slack** adds a small, significant gain (−0.01 to −0.015 min).
+- **Ridge, with the same features, barely beats the historical median**: the relationships are non-linear (recovery depends on how late the train already is).
+- Δd has a structural offset of ≈ −0.8 min (trains tend to arrive slightly early); the constant offset captures it, so it is not counted as skill.
+- Details: [`notebooks/02-labels-baselines.ipynb`](notebooks/02-labels-baselines.ipynb), [`notebooks/03-tabular-models.ipynb`](notebooks/03-tabular-models.ipynb).
 
 ## Data
 
@@ -57,6 +61,8 @@ A second command rebuilds the journeys of in-scope trains, applying the data-qua
 uv run python -m swissdelay.data.journeys
 uv run python -m swissdelay.features.labels      # horizon labels (Δd at 15 / 30 / 60 min)
 uv run python -m swissdelay.models.baselines     # disruption days, baselines, validation / test tables
+uv run python -m swissdelay.features.build       # model features (33 per point and horizon)
+uv run python -m swissdelay.models.tabular       # Ridge + XGBoost; --sets all --sample 0.3 for the ablations
 ```
 
 ### Data quality
@@ -93,14 +99,14 @@ The full plan is in [`docs/roadmap.md`](docs/roadmap.md).
 train-delay/
 ├── data/               # raw / interim / processed / external (git-ignored)
 ├── docs/               # roadmap and design notes
-├── notebooks/          # 01 data quality, 02 labels and baselines
+├── notebooks/          # 01 data quality, 02 labels and baselines, 03 Ridge and XGBoost
 ├── reports/figures/    # generated figures
 ├── site/               # minimal results website
 ├── src/swissdelay/
 │   ├── config.py       # paths, scope, horizons, splits
 │   ├── data/           # ingest.py (download → Parquet), journeys.py (journey reconstruction)
-│   ├── features/       # labels.py (horizon labels), features
-│   ├── models/         # baselines.py, then XGBoost, sequence, GNN
+│   ├── features/       # labels.py (horizon labels), build.py (model features)
+│   ├── models/         # baselines.py, tabular.py (Ridge, XGBoost), then sequence, GNN
 │   └── evaluation/     # splits, disruption days, metrics with day-bootstrap CIs
 └── tests/
 ```
@@ -132,7 +138,7 @@ On macOS, XGBoost needs OpenMP: `brew install libomp`.
 - [x] Monthly ingestion to Parquet (`swissdelay.data.ingest`)
 - [x] Data quality report and journey reconstruction (`swissdelay.data.journeys`)
 - [x] Horizon labels, coverage and baselines: persistence, constant offset, historical median (`swissdelay.features.labels`, `swissdelay.models.baselines`)
-- [ ] Ridge and train-only XGBoost
+- [x] Ridge and train-only XGBoost, with history and slack ablations (`swissdelay.models.tabular`)
 - [ ] Network features, leakage tests, **gate** for the GNN
 - [ ] Sequence model
 - [ ] GNN (if the gate passes)
