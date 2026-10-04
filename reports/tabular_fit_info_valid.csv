@@ -1,7 +1,4 @@
-horizon_min,model,set,alpha,tune_mae,seconds,best_iteration,refit_trees
-15,ridge,full,0.1,0.7895983220018028,29,,
-15,xgb,full,,0.6409246341008484,571,3793.0,4174.0
-30,ridge,full,10000.0,0.9488751515936353,29,,
-30,xgb,full,,0.7822310275364868,346,3278.0,3607.0
-60,ridge,full,100000.0,1.0992305588158604,28,,
-60,xgb,full,,0.924271849411667,78,1192.0,1313.0
+horizon_min,model,set,best_iteration,tune_mae,refit_trees,seconds
+15,xgb,full_network_plus,4427,0.6240384792095279,4871,1016
+30,xgb,full_network_plus,3749,0.762948574739097,4125,609
+60,xgb,full_network_plus,1868,0.9063766299536344,2056,173

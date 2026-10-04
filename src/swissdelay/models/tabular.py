@@ -21,7 +21,10 @@ Models:
 
 Feature sets (ablations): ``current`` (current delay + timetable + context + historical prior),
 then ``history_1`` / ``history_3`` / ``history_5`` (1 / 3 / 5 previous stops), ``full``
-(+ timetable slack) and ``full_no_prior``. ``history_5`` vs ``full`` is the slack ablation.
+(+ timetable slack), ``full_no_prior`` and ``full_network`` (+ network state around the train,
+from ``swissdelay.features.network``). ``history_5`` vs ``full`` is the slack ablation;
+``full`` vs ``full_network`` is the gate for a graph model, ``full_network_plus`` adds
+trend, corridor and train-ahead network features.
 
 Outputs:
 
@@ -56,6 +59,11 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from swissdelay import config
 from swissdelay.evaluation.metrics import evaluate
 from swissdelay.features.build import CATEGORICAL_FEATURES, FEATURE_GROUPS
+from swissdelay.features.network import (
+    ALL_NETWORK_FEATURES,
+    NETWORK_FEATURES,
+    NETWORK_PLUS_FEATURES,
+)
 
 log = logging.getLogger("swissdelay.tabular")
 
@@ -79,6 +87,7 @@ XGB_PARAMS = dict(
     n_jobs=-1,
 )
 
+GROUPS = FEATURE_GROUPS | {"network": NETWORK_FEATURES, "network_plus": NETWORK_PLUS_FEATURES}
 _BASE = ["current", "timetable", "context", "prior"]
 FEATURE_SETS: dict[str, list[str]] = {
     "current": _BASE,
@@ -88,6 +97,9 @@ FEATURE_SETS: dict[str, list[str]] = {
     "full": [*_BASE, "history_1", "history_3", "history_5", "slack"],
     "full_no_prior": ["current", "timetable", "context", "history_1", "history_3", "history_5",
                       "slack"],
+    "full_network": [*_BASE, "history_1", "history_3", "history_5", "slack", "network"],
+    "full_network_plus": [*_BASE, "history_1", "history_3", "history_5", "slack", "network",
+                          "network_plus"],
 }  # fmt: skip
 EVAL_COLUMNS = [
     "operating_day", "trip_key", "stop_seq", "horizon_min", "split", "delta_min",
@@ -96,12 +108,14 @@ EVAL_COLUMNS = [
 PREDICTIONS_DIR = config.PROCESSED
 REPORTS_DIR = config.REPORTS
 MODELS_DIR = config.ROOT / "models"
+# monthly files only (network_YYYY-MM), not the network_*_minutes tables
+NETWORK_SOURCE = f"'{config.PROCESSED}/network_????-??.parquet'"
 
 
 def feature_columns(set_name: str) -> list[str]:
     cols: list[str] = []
     for group in FEATURE_SETS[set_name]:
-        cols += [c for c in FEATURE_GROUPS[group] if c not in cols]
+        cols += [c for c in GROUPS[group] if c not in cols]
     return cols
 
 
@@ -120,13 +134,21 @@ def load(
     sample: float = 1.0,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """Load feature rows matching ``where`` (optionally a random share of journeys)."""
+    """Load feature rows matching ``where`` (optionally a random share of journeys).
+
+    Network features live in separate files (``NETWORK_SOURCE``), joined on the point keys
+    only when requested; points without them get missing values.
+    """
     source = source or f"'{config.PROCESSED}/features_*.parquet'"
     cols = ", ".join(dict.fromkeys(columns))
+    relation = f"read_parquet({source}) AS f"
+    if any(c in ALL_NETWORK_FEATURES for c in columns):
+        keys = "trip_key, stop_seq, horizon_min"
+        relation += f" LEFT JOIN read_parquet({NETWORK_SOURCE}) AS n USING ({keys})"
     sampling = ""
     if sample < 1.0:  # sample whole journeys, so a journey's points stay together
         sampling = f"AND hash(trip_key || '{seed}') % 1000 < {int(sample * 1000)}"
-    df = con.sql(f"SELECT {cols} FROM read_parquet({source}) WHERE {where} {sampling}").df()
+    df = con.sql(f"SELECT {cols} FROM {relation} WHERE {where} {sampling}").df()
     for c in df.columns:  # boolean *features* as 0 / 1; bookkeeping flags stay boolean
         if df[c].dtype == bool and c not in EVAL_COLUMNS:
             df[c] = df[c].astype("int8")

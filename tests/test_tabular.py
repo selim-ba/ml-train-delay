@@ -1,10 +1,12 @@
 """Tests for the tabular models on a small synthetic feature table."""
 
+import duckdb
 import numpy as np
 import pandas as pd
 import pytest
 
 from swissdelay.features.build import ALL_FEATURES, CATEGORICAL_FEATURES, META_COLUMNS
+from swissdelay.features.network import ALL_NETWORK_FEATURES, NETWORK_FEATURES
 from swissdelay.models import tabular as tb
 
 SMALL_XGB = tb.XGB_PARAMS | {"n_estimators": 200, "learning_rate": 0.1, "max_depth": 4,
@@ -16,10 +18,12 @@ def test_feature_sets_are_nested_and_clean():
     assert (
         sets["current"] < sets["history_1"] < sets["history_3"] < sets["history_5"] < sets["full"]
     )
+    assert sets["full_network"] == sets["full"] | set(NETWORK_FEATURES)
+    assert sets["full_network_plus"] == sets["full"] | set(ALL_NETWORK_FEATURES)
     assert "pred_historical" not in sets["full_no_prior"]
     forbidden = {"delta_min", "target_seq", "split", "in_common_subset", "is_disruption_day"}
     for cols in sets.values():
-        assert cols <= set(ALL_FEATURES)
+        assert cols <= set(ALL_FEATURES) | set(ALL_NETWORK_FEATURES)
         assert not cols & forbidden
         assert not cols & (set(META_COLUMNS) - {"station_id", "line_name"})
 
@@ -99,3 +103,18 @@ def test_refit_is_not_worse_on_this_data(results):
     preds, _ = results
     # same signal, one more month of data: the refit should not degrade much
     assert mae(preds, "pred_xgb_full") <= 1.05 * mae(preds, "pred_xgb_norefit_full")
+
+
+def test_network_features_are_joined(tmp_path, monkeypatch):
+    feats = tmp_path / "features_x.parquet"
+    df = synthetic(feats, n_days=3, per_day=4)
+    net = df[["trip_key", "stop_seq", "horizon_min"]].iloc[:-1].copy()  # last point missing
+    for i, c in enumerate(NETWORK_FEATURES):
+        net[c] = float(i)
+    net.to_parquet(tmp_path / "network_x.parquet", index=False)
+    monkeypatch.setattr(tb, "NETWORK_SOURCE", f"'{tmp_path / 'network_x.parquet'}'")
+    cols = ["trip_key", *tb.feature_columns("full_network")]
+    got = tb.load(duckdb.connect(), "true", cols, source=f"'{feats}'").set_index("trip_key")
+    assert len(got) == len(df)
+    assert got.loc[df["trip_key"].iloc[0], NETWORK_FEATURES[2]] == 2.0
+    assert got.loc[df["trip_key"].iloc[-1], NETWORK_FEATURES].isna().all()
