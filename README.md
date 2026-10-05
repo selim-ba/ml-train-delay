@@ -4,7 +4,7 @@
 
 SwissDelay is a leakage-safe benchmark of train-delay propagation on Swiss operating data. At every measured departure of an IC, IR, RE or EC train, it predicts how the delay will change **15, 30 and 60 minutes ahead**, and compares persistence, historical means, Ridge, XGBoost with and without network features, and a graph transformer.
 
-> **Status:** 🚧 models and final evaluation done (test month June 2026). Next: the nightly replay of Jul – Sep 2026 as simulated production, the API and dashboard, and the results website.
+> **Status:** 🚧 models, final evaluation (June 2026) and simulated production (replay of Jul – Sep 2026) done. Next: the API and dashboard, and the results website.
 
 ## Results
 
@@ -19,7 +19,20 @@ SwissDelay is a leakage-safe benchmark of train-delay propagation on Swiss opera
 | **XGBoost + network features** (deployed) | **0.805** [0.774, 0.834] | **0.990** [0.943, 1.032] | **1.200** [1.134, 1.264] |
 | Average of graph transformer and XGBoost (research) | 0.797 (−1.0 %) | — | — |
 
-Prediction intervals (P10–P90, conformal calibration): **77 % coverage** on the test month (target 80 %).
+Prediction intervals (P10–P90, conformal calibration): **77 % coverage** on the test month with offsets calibrated on April (target 80 %); **80 %** in simulated production, where the offsets are recomputed every night on the last 14 days.
+
+**Simulated production (Jul – Sep 2026).** The frozen model was replayed day by day for 92 days (2.8 M predictions), as a nightly job would run it.
+
+| | 15 min | 30 min | 60 min |
+|---|---|---|---|
+| MAE, normal days (79) | 0.690 | 0.865 | 1.056 |
+| MAE, disruption days (13) | 0.780 | 1.002 | 1.253 |
+| vs historical median | −22 / −20 % | −21 / −20 % | −21 / −20 % |
+| P10–P90 coverage (normal / disruption days) | 80 / 79 % | 80 / 79 % | 80 / 79 % |
+
+- **No degradation without retraining.** The gain over the historical baseline is flat across July, August and September, and no input drifted from training (PSI ≤ 0.08 on every day).
+- **Calibrated intervals in production.** Each night, one conformal offset per tail is recomputed from the last 14 days. That gives 80 % coverage with 10 % in each tail, in every delay bucket, for intervals 5–10 % wider.
+- **Monitoring:** 5 alerts in 92 days, all on genuinely bad days.
 
 - **XGBoost cuts the error by 19 % vs the historical median** and by 33–42 % vs persistence, at every horizon. The validation month (May) gave the same picture (−21 %), so the model choice did not overfit it. The gain is largest for trains 3–10 min late: −31 to −42 %.
 - **The state of the network helps, and helps more when things go wrong.** 33 features on all trains measured before `t − 2 min` improve XGBoost by −2.8 / −2.7 / −1.8 %. Those features cover:
@@ -38,7 +51,7 @@ Prediction intervals (P10–P90, conformal calibration): **77 % coverage** on th
 - **Ridge, with the same features, barely beats the historical median**: the relationships are non-linear (recovery depends on how late the train already is).
 - **Intervals under-cover in a disrupted month.** They are calibrated on April; on June 77 % of outcomes fall inside them (76 % on disruption days), and the misses are mostly trains ending later than P90.
 - Δd has a structural offset of ≈ −0.8 min (trains tend to arrive slightly early); the constant offset captures it, so it is not counted as skill.
-- Details: [`notebooks/02-labels-baselines.ipynb`](notebooks/02-labels-baselines.ipynb), [`notebooks/03-tabular-models.ipynb`](notebooks/03-tabular-models.ipynb), [`notebooks/04-network-gate.ipynb`](notebooks/04-network-gate.ipynb), [`notebooks/05-graph-transformer.ipynb`](notebooks/05-graph-transformer.ipynb), [`notebooks/06-test-results.ipynb`](notebooks/06-test-results.ipynb) (final results).
+- Details: [`notebooks/02-labels-baselines.ipynb`](notebooks/02-labels-baselines.ipynb), [`notebooks/03-tabular-models.ipynb`](notebooks/03-tabular-models.ipynb), [`notebooks/04-network-gate.ipynb`](notebooks/04-network-gate.ipynb), [`notebooks/05-graph-transformer.ipynb`](notebooks/05-graph-transformer.ipynb), [`notebooks/06-test-results.ipynb`](notebooks/06-test-results.ipynb) (final results), [`notebooks/07-production-replay.ipynb`](notebooks/07-production-replay.ipynb) (simulated production).
 
 ## Data
 
@@ -82,6 +95,8 @@ uv run python -m swissdelay.features.network     # network-state features (all t
 uv run python -m swissdelay.models.tabular       # Ridge + XGBoost; --sets all --sample 0.3 for the ablations
 uv run python -m swissdelay.models.tabular --models xgb --sets full full_network full_network_plus
 uv run python -m swissdelay.models.quantile      # P10 / P90 with conformal calibration
+uv run python -m swissdelay.models.registry      # export the deployed model to models/champion/ (verified)
+uv run python -m swissdelay.pipeline.replay      # simulated production, Jul – Sep 2026 → reports/daily_metrics.csv
 uv run python -m swissdelay.features.graph       # per-point subgraphs for the graph transformer (15 min)
 uv sync --group dev --group dl                   # PyTorch
 uv run python -m swissdelay.models.graph_transformer --variant graph --refit   # also: nograph, random
@@ -121,14 +136,15 @@ The full plan is in [`docs/roadmap.md`](docs/roadmap.md).
 train-delay/
 ├── data/               # raw / interim / processed / external (git-ignored)
 ├── docs/               # roadmap and design notes
-├── notebooks/          # 01 data quality, 02 labels and baselines, 03 Ridge and XGBoost, 04 network features, 05 graph transformer, 06 test results
+├── notebooks/          # 01 data quality, 02 labels and baselines, 03 Ridge and XGBoost, 04 network features, 05 graph transformer, 06 test results, 07 production replay
 ├── reports/figures/    # generated figures
 ├── site/               # minimal results website
 ├── src/swissdelay/
 │   ├── config.py       # paths, scope, horizons, splits
 │   ├── data/           # ingest.py (download → Parquet), journeys.py (journey reconstruction)
 │   ├── features/       # labels.py, build.py (model features), network.py (network state), graph.py (subgraphs)
-│   ├── models/         # baselines.py, tabular.py (Ridge, XGBoost), quantile.py, graph_transformer.py
+│   ├── models/         # baselines.py, tabular.py (Ridge, XGBoost), quantile.py, registry.py, graph_transformer.py
+│   ├── pipeline/       # replay.py (simulated production: daily metrics, drift, alerts)
 │   └── evaluation/     # splits, disruption days, metrics with day-bootstrap CIs
 └── tests/
 ```
@@ -165,7 +181,8 @@ On macOS, XGBoost needs OpenMP: `brew install libomp`.
 - [x] Graph transformer on per-point subgraphs, vs no-graph and random-graph controls, 15 min (`swissdelay.models.graph_transformer`)
 - [x] Prediction intervals: quantile XGBoost with conformal calibration (`swissdelay.models.quantile`)
 - [x] Final evaluation on the test month: severity and disruption breakdowns, confidence intervals
-- [ ] Nightly replay pipeline, API, dashboard
+- [x] Simulated production: replay of Jul – Sep 2026, daily metrics, drift, alerts, rolling interval calibration (`swissdelay.pipeline.replay`)
+- [ ] API and dashboard
 - [ ] Write-up and results website
 
 ## License
