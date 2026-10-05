@@ -16,6 +16,7 @@ format:
 
 test:
 	uv run pytest
+	@if uv run python -c 'import torch' 2>/dev/null; then SWISSDELAY_TORCH_TESTS=1 uv run pytest; else echo 'PyTorch not installed: graph-transformer tests skipped'; fi
 
 reproduce:      ## rebuild baselines and report (filled in as the pipeline grows)
 	@echo "Not implemented yet — see docs/roadmap.md"
