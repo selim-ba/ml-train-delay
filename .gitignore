@@ -32,3 +32,4 @@ models/*.joblib
 # Private working notes (not pushed)
 ROADMAP.md
 reports/*.log
+models/champion/
