@@ -2,9 +2,14 @@
 
 - ``reports/example_request.json``: one train 3–8 min late, as a ``POST /predict`` body
   (with the realised changes in delay alongside, for comparison);
-- ``reports/showcase.json``: the dashboard's data: a handful of real departures of
-  September 2026 (from on time to very late, each with its features, station names, planned
-  times and what actually happened) and the daily average delay over the whole period.
+- ``src/swissdelay/serve/showcase.json`` (committed): the dashboard's data bundle:
+  - a handful of real departures of September 2026, from on time to very late, each with
+    its features, station names, planned times, what actually happened, and the answer of
+    ``POST /predict`` (so the online dashboard works without the 700 MB of models);
+  - the daily average delay over the whole period;
+  - ``GET /health`` and ``GET /metrics/daily`` of the simulated production.
+
+Needs the exported model (``models.registry``) and the replay outputs (``pipeline.replay``).
 
 Usage::
 
@@ -17,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 import duckdb
 import pandas as pd
@@ -27,7 +33,7 @@ from swissdelay.models import registry
 from swissdelay.models import tabular as tb
 
 OUT = config.REPORTS / "example_request.json"
-SHOWCASE = config.REPORTS / "showcase.json"
+SHOWCASE = Path(__file__).parent / "showcase.json"
 
 # (name, current delay from, to, number of trains) for the dashboard's examples
 SHOWCASE_BUCKETS = (("on time", -1, 1, 2), ("a little late", 1, 3, 2), ("late", 3, 10, 3),
@@ -154,6 +160,26 @@ def daily_delay() -> list[dict]:
     return json.loads(d[keep].to_json(orient="records"))
 
 
+def bundle(trains: list[dict]) -> dict:
+    """The dashboard's data, with the API's own answers (same code path as the service)."""
+    from fastapi.testclient import TestClient
+
+    from swissdelay.serve.api import create_app
+
+    client = TestClient(create_app())
+
+    def call(method: str, path: str, **kwargs):
+        r = getattr(client, method)(path, **kwargs)
+        r.raise_for_status()
+        return r.json()
+
+    for t in trains:
+        t["predictions"] = call("post", "/predict", json={"points": t["points"]})
+    health = {k: v for k, v in call("get", "/health").items() if k != "features"}
+    return {"trains": trains, "daily": daily_delay(), "health": health,
+            "metrics": call("get", "/metrics/daily")}  # fmt: skip
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--day", default="2026-09-30")
@@ -164,7 +190,7 @@ def main(argv: list[str] | None = None) -> None:
     OUT.write_text(json.dumps(req, indent=1))
     print(f"Wrote {OUT}: {req['_about']}")
     trains = showcase_trains(seed=args.seed)
-    SHOWCASE.write_text(json.dumps({"trains": trains, "daily": daily_delay()}, indent=1))
+    SHOWCASE.write_text(json.dumps(bundle(trains), indent=1))
     print(f"Wrote {SHOWCASE}: {len(trains)} trains")
     for t in trains:
         print(f"  [{t['bucket']}] {t['label']}")

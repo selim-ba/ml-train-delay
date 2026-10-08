@@ -4,8 +4,6 @@
 
 Your train leaves its station 4 minutes late. Will you still be late at your stop in half an hour? Will the train make up time, or lose more? SwissDelay predicts, for every long-distance train in Switzerland (IC, IR, RE and EC), **how its delay will change over the next 15, 30 and 60 minutes**, and gives a likely range around each prediction. The models were trained on 14 months of open Swiss railway data, compared fairly against simple rules, tested once on a month they had never seen, and then run for three months as if in service.
 
-> **Status:** models, final test (June 2026), simulated production (July – September 2026), prediction API and dashboard done. Next: a short write-up and a public results page.
-
 ## In short
 
 - **Data:** 14 months (August 2025 – September 2026) of the official open record of every train stop in Switzerland: 76 million train records, 1.1 million long-distance train runs, 7.4 million examples to learn from.
@@ -14,7 +12,7 @@ Your train leaves its station 4 minutes late. Will you still be late at your sto
 - **Reliability over time:** run day by day from July to September 2026 **without retraining**, the model kept the same advantage (−21 %), with no sign of ageing.
 - **Research:** a graph neural network (a graph transformer reading the railway map around each train) tied the deployed model; averaging the two was only 1 % better, so the simpler, faster model stays.
 
-The interactive dashboard explains the project for non-specialists, shows every result, and lets you query the live model on real trains (see [Run it](#run-it)).
+**Dashboard:** _online link coming soon_. It explains the project for non-specialists, shows every result, and lets you see the model's predictions on real trains. You can also run it locally with the live model (see [Run it](#run-it)).
 
 ## The methods and their tags
 
@@ -93,8 +91,6 @@ Analysis notebooks, for details: [data quality](notebooks/01-data-quality.ipynb)
 - **Likely range:** two quantile XGBoost models give P10 and P90; each end is then widened by a split-conformal margin, per current-delay bucket (on time, 1–3, 3–10, > 10 min late), so that 10 % of real delays fall below and 10 % above. In production, the margins are recomputed every night from the last 14 days.
 - **Monitoring (per horizon, every day):** an alert is raised when the day's MAE exceeds 1.25 × the median of the previous 14 days, when fewer than 70 % of real delays fall inside the range, or when the drift score (PSI) of the current delays, hours of departure or traffic at stations exceeds 0.25.
 
-The full plan is in [`docs/roadmap.md`](docs/roadmap.md).
-
 ## Data
 
 | Source | Use |
@@ -166,7 +162,7 @@ Add `--test` to score the test month (once, at the end).
 ```bash
 uv run python -m swissdelay.models.registry               # export M2 to models/champion/ (verified)
 uv run python -m swissdelay.pipeline.replay               # Jul – Sep 2026 day by day → reports/daily_metrics.csv
-uv run python -m swissdelay.serve.example                 # example trains for the dashboard
+uv run python -m swissdelay.serve.example                 # dashboard data bundle: example trains + their predictions
 ```
 
 ### 4. Serve
@@ -205,26 +201,11 @@ train-delay/
 │   ├── models/         # baselines.py (R1–R3), tabular.py (Ridge, M1, M2), quantile.py, registry.py, graph_transformer.py
 │   ├── evaluation/     # splits, disrupted days, metrics with day-bootstrap CIs
 │   ├── pipeline/       # replay.py (simulated production: daily metrics, drift, alerts)
-│   └── serve/          # api.py (FastAPI), dashboard.py (Streamlit), example.py
+│   └── serve/          # api.py (FastAPI), dashboard.py (Streamlit), example.py, showcase.json (data bundle)
 ├── tests/
 ├── Dockerfile, docker-compose.yml
 └── .github/workflows/ci.yml   # lint + tests on every push
 ```
-
-## Roadmap
-
-- [x] Project setup
-- [x] Monthly ingestion to Parquet (`swissdelay.data.ingest`)
-- [x] Data quality report and journey reconstruction (`swissdelay.data.journeys`)
-- [x] Horizon labels and simple rules R1–R3 (`swissdelay.features.labels`, `swissdelay.models.baselines`)
-- [x] Ridge and M1, with history and timetable-slack ablations (`swissdelay.models.tabular`)
-- [x] Network inputs (M2), leakage tests, gate for a graph model (`swissdelay.features.network`)
-- [x] Graph transformer G1–G4 on per-departure subgraphs, 15 min (`swissdelay.models.graph_transformer`)
-- [x] Likely ranges: quantile XGBoost with conformal calibration (`swissdelay.models.quantile`)
-- [x] Final evaluation on the test month: breakdowns by delay and disrupted days, confidence intervals
-- [x] Simulated production: day-by-day replay, daily metrics, drift, alerts, nightly range calibration (`swissdelay.pipeline.replay`)
-- [x] Prediction API, dashboard and Docker (`swissdelay.serve`)
-- [ ] Write-up and public results page
 
 ## License
 

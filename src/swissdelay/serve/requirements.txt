@@ -1,0 +1,6 @@
+# Dependencies of the online dashboard (Streamlit Community Cloud reads this file because it
+# sits next to the entrypoint, dashboard.py). The full project uses pyproject.toml / uv.lock.
+streamlit==1.64.0
+altair==6.3.0
+pandas==3.0.6
+requests==2.34.2

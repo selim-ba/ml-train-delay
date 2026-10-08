@@ -25,5 +25,3 @@ services:
     environment:
       SWISSDELAY_API: http://api:8000
     ports: ["8501:8501"]
-    volumes:
-      - ./reports:/app/reports:ro   # showcase.json (uv run python -m swissdelay.serve.example)

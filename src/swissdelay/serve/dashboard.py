@@ -8,7 +8,12 @@ Usage::
     uv run streamlit run src/swissdelay/serve/dashboard.py
 
 ``SWISSDELAY_API`` sets the API address (default ``http://localhost:8000``) and
-``SWISSDELAY_SHOWCASE`` the example trains (default ``reports/showcase.json``).
+``SWISSDELAY_SHOWCASE`` the data bundle (default ``showcase.json`` next to this file:
+example trains with predictions computed in advance by the API, production metrics).
+
+Without a reachable API (e.g. the online deployment, where the 700 MB of models are not
+available), every page reads the bundle instead: the dashboard then needs only Streamlit,
+Altair, pandas and requests (``requirements.txt`` next to this file).
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ import requests
 import streamlit as st
 
 API = os.environ.get("SWISSDELAY_API", "http://localhost:8000")
-SHOWCASE = Path(os.environ.get("SWISSDELAY_SHOWCASE", "reports/showcase.json"))
+SHOWCASE = Path(os.environ.get("SWISSDELAY_SHOWCASE", Path(__file__).parent / "showcase.json"))
 GITHUB = "https://github.com/selim-ba/ml-train-delay"
 
 # validated categorical palette and neutrals
@@ -104,6 +109,15 @@ def post(path: str, body: str):
                       headers={"Content-Type": "application/json"})  # fmt: skip
     r.raise_for_status()
     return r.json()
+
+
+@st.cache_data(ttl=60)
+def api_up() -> bool:
+    """Is the prediction service reachable? If not, pages fall back to the data bundle."""
+    try:
+        return requests.get(f"{API}/health", timeout=2).ok
+    except requests.RequestException:
+        return False
 
 
 @st.cache_data
@@ -897,9 +911,12 @@ ALERT_NAMES = {"mae_jump": "Error jump", "low_coverage": "Low coverage",
 
 def production_page() -> None:
     st.title("In production")
+    bundle = showcase()
     try:
-        daily = pd.DataFrame(get("/metrics/daily"))
-        health = get("/health")
+        if api_up() or bundle is None:
+            daily, health = pd.DataFrame(get("/metrics/daily")), get("/health")
+        else:  # online deployment: the metrics recorded during the simulated production
+            daily, health = pd.DataFrame(bundle["metrics"]), bundle["health"]
     except requests.RequestException as e:
         api_down(e)
         pager("production")
@@ -1048,11 +1065,19 @@ def production_page() -> None:
 
 def try_page() -> None:
     st.title("Try it")
+    live = api_up()
+    how = (
+        "is sent to the **live prediction service**, which runs the deployed model **M2** "
+        "(XGBoost with network data), exactly as a travel app would do it."
+        if live
+        else "was sent to the prediction service running the deployed model **M2** (XGBoost "
+        "with network data); this online version shows its answers, computed in advance "
+        "because the models (700 MB) are too large to host here."
+    )
     st.markdown(
         "Pick a real train from September 2026, during the simulated production. Its situation "
-        "at departure (its 65 inputs) is sent to the **live prediction service**, which runs "
-        "the deployed model **M2** (XGBoost with network data), exactly as a travel app would "
-        "do it. Make your own guess first, then reveal what actually happened."
+        f"at departure (its 65 inputs) {how} Make your own guess first, then reveal what "
+        "actually happened."
     )
     data = showcase()
     if data is None:
@@ -1070,7 +1095,10 @@ def try_page() -> None:
     i = st.selectbox("Train", range(len(trains)), format_func=label)
     t = trains[i]
     try:
-        preds = post("/predict", json.dumps({"points": t["points"]}))
+        if live or "predictions" not in t:
+            preds = post("/predict", json.dumps({"points": t["points"]}))
+        else:
+            preds = t["predictions"]
     except requests.RequestException as e:
         api_down(e)
         pager("try")

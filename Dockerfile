@@ -17,7 +17,6 @@ RUN uv sync --locked --no-dev --group serve
 
 ENV PATH="/app/.venv/bin:$PATH" \
     SWISSDELAY_MODEL_DIR=/app/models/champion \
-    SWISSDELAY_METRICS=/app/data/processed/replay/daily_metrics.parquet \
-    SWISSDELAY_BENCHMARK=/app/reports/tabular_test.csv
+    SWISSDELAY_METRICS=/app/data/processed/replay/daily_metrics.parquet
 EXPOSE 8000 8501
 CMD ["uvicorn", "swissdelay.serve.api:app", "--host", "0.0.0.0", "--port", "8000"]
