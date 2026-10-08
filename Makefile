@@ -1,4 +1,4 @@
-.PHONY: install install-all lint format test reproduce clean
+.PHONY: install install-all lint format test reproduce clean api dashboard docker
 
 install:        ## core + dev tools
 	uv sync
@@ -26,3 +26,11 @@ clean:
 
 journeys:       ## rebuild journeys from data/interim
 	uv run python -m swissdelay.data.journeys
+api:            ## serve the model locally: http://localhost:8000/docs
+	uv run uvicorn swissdelay.serve.api:app --reload
+
+dashboard:      ## dashboard on http://localhost:8501 (needs the API running)
+	uv run streamlit run src/swissdelay/serve/dashboard.py
+
+docker:         ## API + dashboard in Docker
+	docker compose up --build

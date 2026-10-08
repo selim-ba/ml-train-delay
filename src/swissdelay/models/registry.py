@@ -5,6 +5,9 @@ in-memory state:
 
 - ``xgb_p50_h{H}.json``, ``xgb_q10_h{H}.json``, ``xgb_q90_h{H}.json``: the champion
   (XGBoost ``full_network_plus``, refit on Aug 2025 – Apr 2026) and its two quantile models;
+- ``calibration.json`` (optional, written by the nightly job): the latest interval offsets,
+  one per tail, current-delay bucket and horizon, recomputed on the last 14 days
+  (``rolling_tails``). Without it, the April offsets of the manifest are used;
 - ``manifest.json``: feature set and columns, category levels of the categorical features
   per horizon (the codes XGBoost was trained with), conformal offsets of the intervals
   (calibrated on April 2026), the training period, and reference distributions for drift
@@ -38,6 +41,7 @@ from swissdelay.models import tabular as tb
 log = logging.getLogger("swissdelay.registry")
 
 CHAMPION_DIR = tb.MODELS_DIR / "champion"
+CALIBRATION_FILE = "calibration.json"
 FEATURE_SET = "full_network_plus"
 DRIFT_FEATURES = ("d0_min", "hour", "net_cur_n")
 DRIFT_BINS = 10
@@ -120,6 +124,7 @@ class Champion:
 
     manifest: dict
     models: dict[tuple[int, str], xgb.Booster]
+    calibration: dict | None = None  # latest rolling_tails offsets (calibration.json)
 
     @property
     def columns(self) -> list[str]:
@@ -135,16 +140,25 @@ class Champion:
                 x[c] = x[c].astype("float32")
         return xgb.DMatrix(x, enable_categorical=True)
 
+    def tail_offsets(self, horizon: int) -> dict[str, tuple[float, float]]:
+        """(lower, upper) interval offset per current-delay bucket: the latest rolling
+        calibration if present, else the symmetric April offsets of the manifest."""
+        if self.calibration is not None:
+            return {b: tuple(v) for b, v in self.calibration["offsets"][str(horizon)].items()}
+        return {b: (v, v) for b, v in self.manifest["offsets"][str(horizon)].items()}
+
     def predict(self, df: pd.DataFrame, horizon: int) -> pd.DataFrame:
-        """P50, raw P10 / P90 and calibrated interval (offsets of the manifest) for rows of
-        one horizon."""
+        """P50, raw P10 / P90 and calibrated interval ``[lo, hi]`` for rows of one horizon."""
         m = self.matrix(df, horizon)
         p50, q10, q90 = (self.models[(horizon, k)].predict(m) for k in ("p50", "q10", "q90"))
-        shift = qt.d0_bucket(df["d0_min"]).map(self.manifest["offsets"][str(horizon)]).fillna(0)
+        offsets = self.tail_offsets(horizon)
+        buckets = qt.d0_bucket(df["d0_min"])
+        lo_shift = buckets.map({b: v[0] for b, v in offsets.items()}).fillna(0).to_numpy()
+        hi_shift = buckets.map({b: v[1] for b, v in offsets.items()}).fillna(0).to_numpy()
         # P50 is always the champion's own forecast; the interval is widened to contain it
         # where the separately trained quantile models cross it
-        lo = np.minimum(q10 - shift.to_numpy(), p50)
-        hi = np.maximum(q90 + shift.to_numpy(), p50)
+        lo = np.minimum(q10 - lo_shift, p50)
+        hi = np.maximum(q90 + hi_shift, p50)
         return pd.DataFrame({"p50": p50, "q10": q10, "q90": q90, "lo": lo, "hi": hi},
                             index=df.index)  # fmt: skip
 
@@ -157,7 +171,22 @@ def load(path: Path = CHAMPION_DIR) -> Champion:
             booster = xgb.Booster()
             booster.load_model(path / f"xgb_{k}_h{h}.json")
             models[(h, k)] = booster
-    return Champion(manifest, models)
+    cal_path = path / CALIBRATION_FILE
+    calibration = json.loads(cal_path.read_text()) if cal_path.exists() else None
+    return Champion(manifest, models, calibration)
+
+
+def save_calibration(offsets: dict[int, dict[str, tuple[float, float]]], window: list[str],
+                     path: Path = CHAMPION_DIR) -> Path:  # fmt: skip
+    """Write the latest per-tail offsets (``{horizon: {bucket: (lower, upper)}}``)."""
+    out = path / CALIBRATION_FILE
+    out.write_text(json.dumps({
+        "strategy": "rolling_tails", "window": [window[0], window[-1]], "n_days": len(window),
+        "updated": datetime.now(UTC).isoformat(timespec="seconds"),
+        "offsets": {str(h): {b: [float(lo), float(hi)] for b, (lo, hi) in o.items()}
+                    for h, o in offsets.items()},
+    }, indent=1))  # fmt: skip
+    return out
 
 
 def verify(champion: Champion, split: str = "test", n: int = 20_000) -> dict[int, float]:

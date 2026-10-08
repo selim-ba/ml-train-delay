@@ -21,8 +21,10 @@ code and leakage rules as for training (events before ``t − 2 min``), month by
 replay reads them one day at a time. The live pipeline would build the same features from
 each new daily file.
 
-Outputs: ``data/processed/replay/daily_metrics.parquet`` (also ``reports/daily_metrics.csv``)
-and ``data/processed/replay/predictions_YYYY-MM.parquet``.
+Outputs: ``data/processed/replay/daily_metrics.parquet`` (also ``reports/daily_metrics.csv``),
+``data/processed/replay/predictions_YYYY-MM.parquet``, and the final calibration state
+``models/champion/calibration.json`` (the ``rolling_tails`` offsets of the last 14 days, used
+by the API).
 
 Usage::
 
@@ -37,6 +39,7 @@ import argparse
 import logging
 import time
 from collections import deque
+from pathlib import Path
 
 import duckdb
 import numpy as np
@@ -196,7 +199,8 @@ def day_rows(con: duckdb.DuckDBPyConnection, day: str, columns: list[str]) -> pd
     return tb.load(con, f"operating_day = DATE '{day}' AND delta_min IS NOT NULL", cols)
 
 
-def replay(start: str = START, end: str = END, champion=None) -> pd.DataFrame:
+def replay(start: str = START, end: str = END, champion=None,
+           calibration_dir: Path | None = registry.CHAMPION_DIR) -> pd.DataFrame:  # fmt: skip
     champion = champion or registry.load()
     con = duckdb.connect()
     cal = RollingCalibrator()
@@ -222,6 +226,11 @@ def replay(start: str = START, end: str = END, champion=None) -> pd.DataFrame:
     REPLAY_DIR.mkdir(parents=True, exist_ok=True)
     for month, fs in frames.items():
         pd.concat(fs).to_parquet(REPLAY_DIR / f"predictions_{month}.parquet", index=False)
+    if calibration_dir is not None and cal.ready:
+        offsets = {h: cal.offsets(h)[1] for h in champion.manifest["horizons"]}
+        path = registry.save_calibration(offsets, cal.last_days(), calibration_dir)
+        log.info("Saved rolling_tails offsets of %s … %s to %s", cal.last_days()[0],
+                 cal.last_days()[-1], path)  # fmt: skip
     out = pd.DataFrame(metrics)
     out.to_parquet(REPLAY_DIR / "daily_metrics.parquet", index=False)
     config.REPORTS.mkdir(parents=True, exist_ok=True)

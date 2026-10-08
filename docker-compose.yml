@@ -1,0 +1,29 @@
+# docker compose up --build   →   API http://localhost:8000/docs · dashboard http://localhost:8501
+# Needs models/champion (uv run python -m swissdelay.models.registry) and the replay outputs
+# (uv run python -m swissdelay.pipeline.replay) on the host.
+services:
+  api:
+    build: .
+    image: swissdelay:latest
+    ports: ["8000:8000"]
+    volumes:
+      - ./models/champion:/app/models/champion:ro
+      - ./data/processed/replay:/app/data/processed/replay:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+
+  dashboard:
+    image: swissdelay:latest
+    depends_on:
+      api:
+        condition: service_healthy
+    command: ["streamlit", "run", "src/swissdelay/serve/dashboard.py",
+              "--server.port=8501", "--server.address=0.0.0.0", "--server.headless=true"]
+    environment:
+      SWISSDELAY_API: http://api:8000
+    ports: ["8501:8501"]
+    volumes:
+      - ./reports:/app/reports:ro   # showcase.json (uv run python -m swissdelay.serve.example)

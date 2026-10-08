@@ -1,189 +1,230 @@
 # SwissDelay
 
-**How much do a train's own history and the state of the network improve short-term delay forecasts over simple baselines?**
+**Can we predict how a train's delay will change?**
 
-SwissDelay is a leakage-safe benchmark of train-delay propagation on Swiss operating data. At every measured departure of an IC, IR, RE or EC train, it predicts how the delay will change **15, 30 and 60 minutes ahead**, and compares persistence, historical means, Ridge, XGBoost with and without network features, and a graph transformer.
+Your train leaves its station 4 minutes late. Will you still be late at your stop in half an hour? Will the train make up time, or lose more? SwissDelay predicts, for every long-distance train in Switzerland (IC, IR, RE and EC), **how its delay will change over the next 15, 30 and 60 minutes**, and gives a likely range around each prediction. The models were trained on 14 months of open Swiss railway data, compared fairly against simple rules, tested once on a month they had never seen, and then run for three months as if in service.
 
-> **Status:** 🚧 models, final evaluation (June 2026) and simulated production (replay of Jul – Sep 2026) done. Next: the API and dashboard, and the results website.
+> **Status:** models, final test (June 2026), simulated production (July – September 2026), prediction API and dashboard done. Next: a short write-up and a public results page.
+
+## In short
+
+- **Data:** 14 months (August 2025 – September 2026) of the official open record of every train stop in Switzerland: 76 million train records, 1.1 million long-distance train runs, 7.4 million examples to learn from.
+- **Result:** 15 minutes ahead, the deployed model is typically **0.8 minutes off**. That is **19 % less error than the best simple rule** (*"the train will do what trains usually do on this line, at this station and hour"*), and 42 % less than assuming the delay stays the same. The gain over the best simple rule is the same 30 and 60 minutes ahead (−19 %).
+- **Likely range:** each prediction comes with a range built so that the real delay falls inside it for 8 trains out of 10. Over three months of simulated production, **80 %** did.
+- **Reliability over time:** run day by day from July to September 2026 **without retraining**, the model kept the same advantage (−21 %), with no sign of ageing.
+- **Research:** a graph neural network (a graph transformer reading the railway map around each train) tied the deployed model; averaging the two was only 1 % better, so the simpler, faster model stays.
+
+The interactive dashboard explains the project for non-specialists, shows every result, and lets you query the live model on real trains (see [Run it](#run-it)).
+
+## The methods and their tags
+
+Every method has a short tag, used in the tables below and in the dashboard.
+
+| Tag | Method | What it uses to predict the change in delay |
+|---|---|---|
+| **R1** | Persistence | nothing: it predicts no change |
+| **R2** | Typical change | the median change of all training examples (about −0.8 min), the same for every train |
+| **R3** | Historical median (best simple rule) | the median change of past trains on the same line, at the same station, horizon, hour and type of day |
+| **M1** | XGBoost (`xgb_full`) | 32 inputs on the train itself: current delay, delays at its last stops, spare time in the timetable, stops ahead, hour, day, type of train, operator, and R3 |
+| **M2** | XGBoost with network data (`xgb_full_network_plus`), **deployed** | M1's inputs plus 33 inputs on the other trains around it: their delays at its stations and on its route, the train just ahead, 10 / 30 / 60-minute trends (65 inputs) |
+| P10 / P90 | Quantile XGBoost | M2's inputs, trained to predict the low and high ends of the likely range |
+| **G1–G4** | Graph transformer variants (research, 15 min) | M1's inputs plus a subgraph of the stations around the train: G1 without the stations (control), G2 with a random map, G3 with the real map, G4 = G3 retrained on all training months |
+| **A** | Average of M2 and G4 (research) | the mean of the two predictions |
 
 ## Results
 
-**Test month (June 2026), used once after every choice was made on May.** Common subset of 175 k prediction points labelled at all three horizons. MAE in minutes of the predicted change in delay; 95 % confidence intervals from a bootstrap over whole days.
+### Test month (June 2026)
 
-| Model | 15 min | 30 min | 60 min |
-|---|---|---|---|
-| Persistence (delay stays the same) | 1.40 | 1.58 | 1.80 |
-| Constant offset (training median Δd) | 1.16 | 1.38 | 1.65 |
-| Historical median (line × station × hour × day type) | 0.99 | 1.23 | 1.49 |
-| XGBoost (train, timetable and context features) | 0.83 | 1.02 | 1.22 |
-| **XGBoost + network features** (deployed) | **0.805** [0.774, 0.834] | **0.990** [0.943, 1.032] | **1.200** [1.134, 1.264] |
-| Average of graph transformer and XGBoost (research) | 0.797 (−1.0 %) | — | — |
-
-Prediction intervals (P10–P90, conformal calibration): **77 % coverage** on the test month with offsets calibrated on April (target 80 %); **80 %** in simulated production, where the offsets are recomputed every night on the last 14 days.
-
-**Simulated production (Jul – Sep 2026).** The frozen model was replayed day by day for 92 days (2.8 M predictions), as a nightly job would run it.
+The test month was used **once**, after every choice had been made on the validation month (May). All methods are scored on the same 175,420 departures per horizon. The metric is the **MAE** (mean absolute error): the average gap, in minutes, between the predicted and the real change in delay. Lower is better. Brackets: 95 % confidence intervals from a bootstrap over whole days.
 
 | | 15 min | 30 min | 60 min |
 |---|---|---|---|
-| MAE, normal days (79) | 0.690 | 0.865 | 1.056 |
-| MAE, disruption days (13) | 0.780 | 1.002 | 1.253 |
-| vs historical median | −22 / −20 % | −21 / −20 % | −21 / −20 % |
-| P10–P90 coverage (normal / disruption days) | 80 / 79 % | 80 / 79 % | 80 / 79 % |
+| R1 · Persistence | 1.40 | 1.58 | 1.80 |
+| R2 · Typical change | 1.16 | 1.38 | 1.65 |
+| R3 · Historical median | 0.99 | 1.23 | 1.49 |
+| M1 · XGBoost | 0.83 | 1.02 | 1.22 |
+| **M2 · XGBoost with network data** (deployed) | **0.805** [0.774, 0.834] | **0.990** [0.943, 1.032] | **1.200** [1.134, 1.264] |
+| A · Average of M2 and G4 (research) | 0.797 (−1.0 %) | — | — |
 
-- **No degradation without retraining.** The gain over the historical baseline is flat across July, August and September, and no input drifted from training (PSI ≤ 0.08 on every day).
-- **Calibrated intervals in production.** Each night, one conformal offset per tail is recomputed from the last 14 days. That gives 80 % coverage with 10 % in each tail, in every delay bucket, for intervals 5–10 % wider.
-- **Monitoring:** 5 alerts in 92 days, all on genuinely bad days.
+**Likely range (P10–P90).** Ranges calibrated once on April covered **77 %** of real delays in June (target 80 %); with margins recomputed every night from the last 14 days, they covered **80 %** in simulated production.
 
-- **XGBoost cuts the error by 19 % vs the historical median** and by 33–42 % vs persistence, at every horizon. The validation month (May) gave the same picture (−21 %), so the model choice did not overfit it. The gain is largest for trains 3–10 min late: −31 to −42 %.
-- **The state of the network helps, and helps more when things go wrong.** 33 features on all trains measured before `t − 2 min` improve XGBoost by −2.8 / −2.7 / −1.8 %. Those features cover:
-  - traffic and delays at the current, next and target stations;
-  - delay gained on the route to the target;
-  - the train just ahead;
-  - 10 / 30 / 60-min trends.
+### Simulated production (July – September 2026)
 
-  On the 13 disruption days of June the gain is −3.0 / −3.1 / −2.6 %, against −2.6 / −2.3 / −1.1 % on normal days.
-- **An explicit graph model does not beat hand-made network features on its own.** A Graphormer-style transformer reads a subgraph per prediction: the stations from the current one to the target and their neighbours, with their recent traffic and delays.
-  - At 15 min it beat XGBoost on May (−0.5 %) but tied it on June.
-  - Averaging the two helps on both months (−1.3 % and −1.0 %).
-  - Randomly rewired edges keep 90 % of the graph's gain: what helps is station-by-station detail, not the network's topology.
-  - The gain is below the 2 % promotion rule, so XGBoost stays the deployed model.
-- **The train's trajectory before its current stop adds nothing** once its current delay, arrival delay and dwell are known; **timetable slack** adds a small, significant gain.
-- **Ridge, with the same features, barely beats the historical median**: the relationships are non-linear (recovery depends on how late the train already is).
-- **Intervals under-cover in a disrupted month.** They are calibrated on April; on June 77 % of outcomes fall inside them (76 % on disruption days), and the misses are mostly trains ending later than P90.
-- Δd has a structural offset of ≈ −0.8 min (trains tend to arrive slightly early); the constant offset captures it, so it is not counted as skill.
-- Details: [`notebooks/02-labels-baselines.ipynb`](notebooks/02-labels-baselines.ipynb), [`notebooks/03-tabular-models.ipynb`](notebooks/03-tabular-models.ipynb), [`notebooks/04-network-gate.ipynb`](notebooks/04-network-gate.ipynb), [`notebooks/05-graph-transformer.ipynb`](notebooks/05-graph-transformer.ipynb), [`notebooks/06-test-results.ipynb`](notebooks/06-test-results.ipynb) (final results), [`notebooks/07-production-replay.ipynb`](notebooks/07-production-replay.ipynb) (simulated production).
+The frozen M2 was replayed day by day for 92 days (2.8 M predictions), exactly as a nightly job would run it: predict, score the previous day, update the likely ranges, check for drift and raise alerts.
+
+| | 15 min | 30 min | 60 min |
+|---|---|---|---|
+| MAE of M2, normal days (79) | 0.690 | 0.865 | 1.056 |
+| MAE of M2, disrupted days (13) | 0.780 | 1.002 | 1.253 |
+| M2 vs R3, normal / disrupted days | −22 / −20 % | −21 / −20 % | −21 / −20 % |
+| Real delays inside the likely range, normal / disrupted days | 80 / 79 % | 80 / 79 % | 80 / 79 % |
+
+A **disrupted day** is a day with unusually high delays and cancellations: its score, combining average delay and share of cancelled trains, exceeds the level of the worst 5 % of training days.
+
+### What we learned
+
+- **M2 cuts the error by 19 % vs R3** and by 33–42 % vs R1, at every horizon. The validation month gave the same picture (−21 %), so the model choice did not overfit it. The gain is largest for trains 3–10 minutes late (−31 to −42 %).
+- **Knowing what happens around the train helps, especially when things go wrong.** The 33 network inputs (M1 → M2), all measured from events at least 2 minutes old, cut the error by 2.8 / 2.7 / 1.8 %; on the 13 disrupted days of June, by 3.0 / 3.1 / 2.6 %, against 2.6 / 2.3 / 1.1 % on normal days.
+- **An explicit graph model does not beat well-designed network inputs on its own.** The graph transformer (G4) beat M2 on May (−0.5 %) but tied it on June. A random map (G2) keeps 90 % of the real map's gain over G1: what helps is station-by-station detail, not the shape of the network. Averaging (A) helps a little (−1.3 % on May, −1.0 % on June), below the 2 % rule set beforehand for running a second, much heavier model.
+- **What the model relies on** (XGBoost total-gain importance): R3 matters most 15 minutes ahead; the train's current delay matters more and more further ahead.
+- **The train's history before its current stop adds nothing** once its current delay, arrival delay and dwell are known; **spare time in the timetable** adds a small, significant gain.
+- **A linear model (Ridge) with the same inputs barely beats R3:** recovery is non-linear (it depends on how late the train already is).
+- **Ranges calibrated on a calm month under-cover in a disrupted one:** 77 % on June, with the misses mostly on the high side (trains ending later than P90). Separate nightly margins for each end fixed it.
+- **No ageing without retraining:** the gain over R3 is flat across July, August and September, and no input drifted from training (PSI ≤ 0.08 every day). 5 alerts in 92 days, all on genuinely bad days.
+- The change in delay has a structural offset of about −0.8 min (trains tend to arrive slightly early); R2 captures it, so it is not counted as skill.
+
+Analysis notebooks, for details: [data quality](notebooks/01-data-quality.ipynb), [labels and baselines](notebooks/02-labels-baselines.ipynb), [Ridge and XGBoost](notebooks/03-tabular-models.ipynb), [network inputs](notebooks/04-network-gate.ipynb), [graph transformer](notebooks/05-graph-transformer.ipynb), [test results](notebooks/06-test-results.ipynb), [simulated production](notebooks/07-production-replay.ipynb).
+
+## How it works
+
+- **Target:** the change in delay `Δd = d(t+h) − d(t)` between the departure now (`t`) and the target stop, so R1 is `Δd = 0`. Knowing the current delay, an error on the change is also the error on the delay at the stop.
+- **Target stop:** for a horizon `h` of 15, 30 or 60 minutes, the first stop the train is **scheduled** to reach at least `h` after leaving. It is never chosen from actual times.
+- **No peeking at the future:** every input uses only events measured at or before `t − 2 min`, because train positions reach the system with a small lag. Automated tests enforce this.
+- **Splits by date only**, so a model is always judged on days after the ones it learned from:
+
+| Period | Role |
+|---|---|
+| Aug 2025 – Apr 2026 | **Training**: the models learn |
+| May 2026 | **Validation**: models and settings are compared, one is chosen |
+| Jun 2026 | **Test**: the chosen model is scored once, nothing changed afterwards |
+| Jul – Sep 2026 | **Simulated production**: replayed day by day, without retraining |
+
+- **Metric:** MAE in minutes; every comparison is paired (same departures) with a bootstrap confidence interval over whole days.
+- **Likely range:** two quantile XGBoost models give P10 and P90; each end is then widened by a split-conformal margin, per current-delay bucket (on time, 1–3, 3–10, > 10 min late), so that 10 % of real delays fall below and 10 % above. In production, the margins are recomputed every night from the last 14 days.
+- **Monitoring (per horizon, every day):** an alert is raised when the day's MAE exceeds 1.25 × the median of the previous 14 days, when fewer than 70 % of real delays fall inside the range, or when the drift score (PSI) of the current delays, hours of departure or traffic at stations exceeds 0.25.
+
+The full plan is in [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Data
 
 | Source | Use |
 |---|---|
 | [Swiss actual data (Ist-Daten v2)](https://data.opentransportdata.swiss/fr/dataset/ist-daten-v2) | Planned and actual times per stop, recent days |
-| [opentransportdata.swiss archive](https://archive.opentransportdata.swiss) | Monthly archives for past months and years |
-| GTFS `stops.txt` | Station coordinates for maps only |
+| [opentransportdata.swiss archive](https://archive.opentransportdata.swiss) | Monthly archives for past months |
+| GTFS `stops.txt` | Station coordinates, for maps only |
 
-- **Scope:** IC, IR, RE and EC trains at every station they serve, nationwide.
-- **Period:** August 2025 to September 2026, v2 format only (after the July 2025 format change).
-- **Kept at ingestion:** every train row (S-Bahn included) and every column, renamed to English. The IC/IR/RE/EC scope is applied in code. See [`docs/data_dictionary.md`](docs/data_dictionary.md).
-- **Ground truth:** only times with status `REAL` count as observed values or labels.
+- **Scope:** IC, IR, RE and EC trains at every Swiss station they serve.
+- **Period:** August 2025 to September 2026, v2 format only (after the July 2025 format change). About 16 GB of raw files per month, all public transport; each month becomes a ~60 MB Parquet file of train rows.
+- **Kept at ingestion:** every train row (S-Bahn included) and every column, renamed to English; the IC/IR/RE/EC scope is applied in code. See [`docs/data_dictionary.md`](docs/data_dictionary.md).
+- **Ground truth:** only times with status `REAL` (really measured, not estimated) count as observations or labels.
 
-| Period | Role |
-|---|---|
-| Aug 2025 – Apr 2026 | Train |
-| May 2026 | Validation |
-| Jun 2026 | Test (headline results) |
-| Jul – Sep 2026 | Simulated production: replayed day by day |
-| Oct 2026 → | Nightly pipeline on new daily files |
-
-### Building the dataset
-
-Raw data is not committed. One command downloads each monthly archive, keeps the train rows, validates them, writes `data/interim/trains_YYYY-MM.parquet` and deletes the raw files:
-
-```bash
-uv run python -m swissdelay.data.ingest 2025-08 2026-09
-```
-
-Each month's source URL, checksums and row counts are recorded in [`data/dataset_manifest.json`](data/dataset_manifest.json). A month of raw CSVs (~16 GB) becomes a ~60 MB Parquet file.
-
-A second command rebuilds the journeys of in-scope trains, applying the data-quality decisions below, and writes `data/processed/journeys_YYYY-MM.parquet`:
-
-```bash
-uv run python -m swissdelay.data.journeys
-uv run python -m swissdelay.features.labels      # horizon labels (Δd at 15 / 30 / 60 min)
-uv run python -m swissdelay.models.baselines     # disruption days, baselines, validation / test tables
-uv run python -m swissdelay.features.build       # model features (33 per point and horizon)
-uv run python -m swissdelay.features.network     # network-state features (all trains, events before t − 2 min)
-uv run python -m swissdelay.models.tabular       # Ridge + XGBoost; --sets all --sample 0.3 for the ablations
-uv run python -m swissdelay.models.tabular --models xgb --sets full full_network full_network_plus
-uv run python -m swissdelay.models.quantile      # P10 / P90 with conformal calibration
-uv run python -m swissdelay.models.registry      # export the deployed model to models/champion/ (verified)
-uv run python -m swissdelay.pipeline.replay      # simulated production, Jul – Sep 2026 → reports/daily_metrics.csv
-uv run python -m swissdelay.features.graph       # per-point subgraphs for the graph transformer (15 min)
-uv sync --group dev --group dl                   # PyTorch
-uv run python -m swissdelay.models.graph_transformer --variant graph --refit   # also: nograph, random
-```
-
-### Data quality
-
-The audit is in [`notebooks/01-data-quality.ipynb`](notebooks/01-data-quality.ipynb) (section 9 summarises it).
-
-| | |
+| Data quality | |
 |---|---|
 | Dataset | 426 days (1 Aug 2025 – 30 Sep 2026), 76.0 M train rows, no missing day |
 | Scope | 1.16 M IC / IR / RE / EC train runs (≈ 2,700 per day) |
 | Measured (`REAL`) times | 95.7 % at Swiss stops, 0.7 % abroad; no feed outage |
 | Delays | median < 1 min (IC / IR / RE), 1.5 min (EC); > 3 min late: 8–10 % (IC / IR / RE), 29 % (EC) |
 | Cancellations | 1.0 % of runs fully, 6.1 % partially; twice as many at weekends (engineering works) |
-| Prediction points | 7.38 M eligible measured departures in 1.11 M journeys (before horizon labels) |
+| Prediction points | 7.38 M eligible measured departures in 1.11 M journeys |
 
-Main cleaning rules, all implemented in `swissdelay.data.journeys`:
+Main cleaning rules (all in `swissdelay.data.journeys`):
 
-- **Swiss stops only**: foreign stops have almost no measured times. Cross-border runs keep their Swiss section, flagged `enters_from_abroad`.
-- **Keep every row, but only `REAL` times count**; a `REAL` time giving a delay outside [−5 min, +6 h] is a data error and is treated as missing.
+- **Swiss stops only:** foreign stops have almost no measured times. Cross-border runs keep their Swiss section, flagged `enters_from_abroad`.
+- **Every row is kept, but only `REAL` times count;** a `REAL` time giving a delay outside [−5 min, +6 h] is a data error and is treated as missing.
 - **Eligible prediction points and targets** exclude three poorly measured operators (FART, DB, DB Regio), stations with < 80 % measured departures over the training months, pass-through and cancelled stops, and anomalous journeys (0.06 %).
 
-## Method
+## Run it
 
-- **Target:** the change in delay `Δd = d(t+h) − d(t)`, so persistence is `Δd = 0`.
-- **Target stop:** the first downstream stop whose **scheduled** time is at least `h` after the prediction time. It is never chosen from actual times.
-- **No leakage:** network features only use events measured at or before `t − 2 min`. Automated tests enforce this.
-- **Splits:** by time only (see the table above).
+Requires [uv](https://docs.astral.sh/uv/) (it installs Python 3.12 if needed). On macOS, XGBoost needs OpenMP: `brew install libomp`.
 
-The full plan is in [`docs/roadmap.md`](docs/roadmap.md).
+```bash
+git clone https://github.com/selim-ba/ml-train-delay.git
+cd ml-train-delay
+uv sync --all-groups    # core, dev tools, PyTorch, serving stack
+make test
+```
+
+The raw data is not committed, so the API and dashboard need the pipeline below to have been run once (it writes the model to `models/champion/` and the production metrics to `data/processed/replay/`).
+
+### 1. Build the dataset
+
+```bash
+uv run python -m swissdelay.data.ingest 2025-08 2026-09   # download, keep train rows, validate → data/interim/
+uv run python -m swissdelay.data.journeys                 # cleaned journeys → data/processed/journeys_YYYY-MM.parquet
+uv run python -m swissdelay.features.labels               # change in delay at 15 / 30 / 60 min
+uv run python -m swissdelay.models.baselines              # disrupted days, R1–R3
+uv run python -m swissdelay.features.build                # inputs on the train itself
+uv run python -m swissdelay.features.network              # network inputs (events before t − 2 min)
+```
+
+Each month's source URL, checksums and row counts are recorded in [`data/dataset_manifest.json`](data/dataset_manifest.json).
+
+### 2. Train and evaluate
+
+```bash
+uv run python -m swissdelay.models.tabular                # Ridge + M1; --sets all --sample 0.3 for the ablations
+uv run python -m swissdelay.models.tabular --models xgb --sets full full_network full_network_plus
+uv run python -m swissdelay.models.quantile               # P10 / P90 with conformal calibration
+uv run python -m swissdelay.features.graph                # subgraphs for the graph transformer (15 min)
+uv run python -m swissdelay.models.graph_transformer --variant graph --refit   # also: nograph, random
+```
+
+Add `--test` to score the test month (once, at the end).
+
+### 3. Deploy and replay production
+
+```bash
+uv run python -m swissdelay.models.registry               # export M2 to models/champion/ (verified)
+uv run python -m swissdelay.pipeline.replay               # Jul – Sep 2026 day by day → reports/daily_metrics.csv
+uv run python -m swissdelay.serve.example                 # example trains for the dashboard
+```
+
+### 4. Serve
+
+```bash
+make api          # prediction API on http://localhost:8000 (interactive docs at /docs)
+make dashboard    # dashboard on http://localhost:8501, in a second terminal
+# or both in Docker:
+docker compose up --build
+```
+
+Example request: `curl -s -X POST localhost:8000/predict -H 'Content-Type: application/json' -d @reports/example_request.json | python3 -m json.tool`.
+
+| Command | What it does |
+|---|---|
+| `make install` / `make install-all` | install the core and dev tools / plus PyTorch and the serving stack |
+| `make lint` | ruff check + format check |
+| `make format` | auto-fix lint issues and format code |
+| `make test` | run pytest (the PyTorch tests run in a separate process) |
+| `make api` / `make dashboard` | start the API / the dashboard |
+| `make docker` | build and start both in Docker |
 
 ## Project structure
 
 ```
 train-delay/
 ├── data/               # raw / interim / processed / external (git-ignored)
-├── docs/               # roadmap and design notes
-├── notebooks/          # 01 data quality, 02 labels and baselines, 03 Ridge and XGBoost, 04 network features, 05 graph transformer, 06 test results, 07 production replay
-├── reports/figures/    # generated figures
-├── site/               # minimal results website
+├── docs/               # roadmap, data dictionary
+├── models/champion/    # exported M2 + P10 / P90 models, manifest, nightly calibration (git-ignored)
+├── notebooks/          # 01 data quality … 07 simulated production
+├── reports/            # result tables, daily metrics, example requests
 ├── src/swissdelay/
 │   ├── config.py       # paths, scope, horizons, splits
 │   ├── data/           # ingest.py (download → Parquet), journeys.py (journey reconstruction)
-│   ├── features/       # labels.py, build.py (model features), network.py (network state), graph.py (subgraphs)
-│   ├── models/         # baselines.py, tabular.py (Ridge, XGBoost), quantile.py, registry.py, graph_transformer.py
+│   ├── features/       # labels.py, build.py (train inputs), network.py (network inputs), graph.py (subgraphs)
+│   ├── models/         # baselines.py (R1–R3), tabular.py (Ridge, M1, M2), quantile.py, registry.py, graph_transformer.py
+│   ├── evaluation/     # splits, disrupted days, metrics with day-bootstrap CIs
 │   ├── pipeline/       # replay.py (simulated production: daily metrics, drift, alerts)
-│   └── evaluation/     # splits, disruption days, metrics with day-bootstrap CIs
-└── tests/
+│   └── serve/          # api.py (FastAPI), dashboard.py (Streamlit), example.py
+├── tests/
+├── Dockerfile, docker-compose.yml
+└── .github/workflows/ci.yml   # lint + tests on every push
 ```
-
-## Getting started
-
-Requires [uv](https://docs.astral.sh/uv/). uv installs Python 3.12 itself if needed.
-
-```bash
-git clone https://github.com/selim-ba/ml-train-delay.git
-cd ml-train-delay
-uv sync                 # core + dev tools
-uv sync --all-groups    # also PyTorch / PyG and the serving stack
-make test
-```
-
-On macOS, XGBoost needs OpenMP: `brew install libomp`.
-
-| Command | What it does |
-|---|---|
-| `make lint` | ruff check + format check |
-| `make format` | auto-fix lint issues and format code |
-| `make test` | run pytest |
-| `make reproduce` | rebuild baselines and the report _(coming soon)_ |
 
 ## Roadmap
 
 - [x] Project setup
 - [x] Monthly ingestion to Parquet (`swissdelay.data.ingest`)
 - [x] Data quality report and journey reconstruction (`swissdelay.data.journeys`)
-- [x] Horizon labels, coverage and baselines: persistence, constant offset, historical median (`swissdelay.features.labels`, `swissdelay.models.baselines`)
-- [x] Ridge and train-only XGBoost, with history and slack ablations (`swissdelay.models.tabular`)
-- [x] Network features, leakage tests, gate for a graph model (`swissdelay.features.network`)
-- [x] Graph transformer on per-point subgraphs, vs no-graph and random-graph controls, 15 min (`swissdelay.models.graph_transformer`)
-- [x] Prediction intervals: quantile XGBoost with conformal calibration (`swissdelay.models.quantile`)
-- [x] Final evaluation on the test month: severity and disruption breakdowns, confidence intervals
-- [x] Simulated production: replay of Jul – Sep 2026, daily metrics, drift, alerts, rolling interval calibration (`swissdelay.pipeline.replay`)
-- [ ] API and dashboard
-- [ ] Write-up and results website
+- [x] Horizon labels and simple rules R1–R3 (`swissdelay.features.labels`, `swissdelay.models.baselines`)
+- [x] Ridge and M1, with history and timetable-slack ablations (`swissdelay.models.tabular`)
+- [x] Network inputs (M2), leakage tests, gate for a graph model (`swissdelay.features.network`)
+- [x] Graph transformer G1–G4 on per-departure subgraphs, 15 min (`swissdelay.models.graph_transformer`)
+- [x] Likely ranges: quantile XGBoost with conformal calibration (`swissdelay.models.quantile`)
+- [x] Final evaluation on the test month: breakdowns by delay and disrupted days, confidence intervals
+- [x] Simulated production: day-by-day replay, daily metrics, drift, alerts, nightly range calibration (`swissdelay.pipeline.replay`)
+- [x] Prediction API, dashboard and Docker (`swissdelay.serve`)
+- [ ] Write-up and public results page
 
 ## License
 
