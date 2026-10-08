@@ -1,6 +1,6 @@
 # SwissDelay
 
-**Can we predict how a train's delay will change?**
+**Can we predict how a train's delay will change?** · [Live dashboard](https://ml-train-delay.streamlit.app/)
 
 Your train leaves its station 4 minutes late. Will you still be late at your stop in half an hour? Will the train make up time, or lose more? SwissDelay predicts, for every long-distance train in Switzerland (IC, IR, RE and EC), **how its delay will change over the next 15, 30 and 60 minutes**, and gives a likely range around each prediction. The models were trained on 14 months of open Swiss railway data, compared fairly against simple rules, tested once on a month they had never seen, and then run for three months as if in service.
 
@@ -12,7 +12,7 @@ Your train leaves its station 4 minutes late. Will you still be late at your sto
 - **Reliability over time:** run day by day from July to September 2026 **without retraining**, the model kept the same advantage (−21 %), with no sign of ageing.
 - **Research:** a graph neural network (a graph transformer reading the railway map around each train) tied the deployed model; averaging the two was only 1 % better, so the simpler, faster model stays.
 
-**Dashboard:** _online link coming soon_. It explains the project for non-specialists, shows every result, and lets you see the model's predictions on real trains. You can also run it locally with the live model (see [Run it](#run-it)).
+**Dashboard: [ml-train-delay.streamlit.app](https://ml-train-delay.streamlit.app/)**. It explains the project for non-specialists, shows every result, and lets you see the model's predictions on real trains. You can also run it locally with the live model (see [Run it](#run-it)).
 
 ## The methods and their tags
 
