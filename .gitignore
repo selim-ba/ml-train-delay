@@ -33,3 +33,4 @@ models/*.joblib
 ROADMAP.md
 reports/*.log
 models/champion/
+docs/roadmap.md
